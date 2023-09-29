@@ -13,7 +13,7 @@ from redis_dict import RedisDict
 class MyRedisDict(RedisDict):
     def __init__(self, *args, **kwargs):
         super().__init__(namespace="bt", host="localhost", port=6379, db=0)
-
+        self.update(kwargs)
 
 # class _RedisDictLike:
 #     """

@@ -742,8 +742,8 @@ class Beamtime(ValidatedDictLike, YamlDict, ABC):
         raise NotImplementedError("This is currently not implemented")
 
 
-# class RedisBeamtime(ValidatedDictLike, MyRedisDict, ABC):
-class RedisBeamtime(MyRedisDict, ABC):
+# class RedisBeamtime(MyRedisDict, ABC):
+class RedisBeamtime(ValidatedDictLike, MyRedisDict, ABC):
     """
     class that carries necessary information for a beamtime
 
@@ -797,11 +797,17 @@ class RedisBeamtime(MyRedisDict, ABC):
     ):
         if experimenters is None:
             experimenters = []
-        super().__init__()
         self._pi_last = pi_last
         self._saf_num = saf_num
         self._experimenters = experimenters
         self._wavelength = wavelength
+        self._kwargs = dict(
+            bt_piLast=_clean_info(pi_last),
+            bt_safN=_clean_info(saf_num),
+            bt_experimenters=experimenters,
+            bt_wavelength=wavelength,
+        )
+        super().__init__(**self._kwargs, **kwargs)
         self.scanplans = MDOrderedDict()
         self.samples = MDOrderedDict()
         self._referenced_by = []
@@ -811,10 +817,10 @@ class RedisBeamtime(MyRedisDict, ABC):
         self._scanplan_order = {}
         self._sample_order = {}
 
-        self.update({"bt_piLast": self._pi_last})
-        self.update({"bt_safN": self._saf_num})
-        self.update({"bt_experimenters": self._experimenters})
-        self.update({"bt_wavelength": self._wavelength})
+        # self.update({"bt_piLast": self._pi_last})
+        # self.update({"bt_safN": self._saf_num})
+        # self.update({"bt_experimenters": self._experimenters})
+        # self.update({"bt_wavelength": self._wavelength})
 
     @property
     def wavelength(self):
