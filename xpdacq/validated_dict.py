@@ -61,11 +61,6 @@ class ValidatedDictLike:
 
     def __setitem__(self, key, val):
         super().__setitem__(key, val)
-        try:
-            self.validate()
-        except ValidationError:
-            super().__delitem__(key)
-            raise ValueError("Validation failed. Unable to set {}: {}".format(key, val))
 
     def __delitem__(self, key):
         val = self[key]
@@ -82,3 +77,18 @@ class ValidatedDictLike:
 
 class ValidationError(Exception):
     pass
+
+
+class RedisValidatedDictLike(ValidatedDictLike):
+    ...
+
+
+class YamlValidatedDictLike(ValidatedDictLike):
+    def __setitem__(self, key, val):
+        super().__setitem__(key, val)
+        try:
+            self.validate()
+            pass
+        except ValidationError:
+            super().__delitem__(key)
+            raise ValueError("Validation failed. Unable to set {}: {}".format(key, val))

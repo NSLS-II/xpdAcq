@@ -30,9 +30,11 @@ from xpdconf.conf import XPD_SHUTTER_CONF
 
 from .glbl import glbl
 from .tools import regularize_dict_key
-from .validated_dict import ValidatedDictLike
+from .validated_dict import RedisValidatedDictLike, YamlValidatedDictLike
 from .xpdacq_conf import xpd_configuration
 from .yamldict import YamlChainMap, YamlDict
+# from redis_dict import RedisDict
+from .redisdict import MyRedisDict
 
 # This is used to map plan names (strings in the YAML file) to actual
 # plan functions in Python.
@@ -71,9 +73,7 @@ def _summarize(plan):
             output.append("{:=^80}".format(" Close Run "))
         elif cmd == "set":
             output.append(
-                "{motor.name} -> {args[0]}".format(
-                    motor=msg.obj, args=msg.args
-                )
+                "{motor.name} -> {args[0]}".format(motor=msg.obj, args=msg.args)
             )
         elif cmd == "create":
             pass
@@ -93,9 +93,11 @@ def configure_area_det(det, exposure, acq_time):
     if hasattr(det, "cam"):
         if hasattr(det.cam, "acquire_time"):
             yield from bps.mv(det.cam.acquire_time, acq_time)
-            real_acq_time = (yield from bps.rd(det.cam.acquire_time))
+            real_acq_time = yield from bps.rd(det.cam.acquire_time)
         else:
-            print("WARNING: `{}.cam` doesn't have `acquire_time` signal.".format(det.name))
+            print(
+                "WARNING: `{}.cam` doesn't have `acquire_time` signal.".format(det.name)
+            )
     else:
         print("WARNING: `{}` doesn't have `cam` component.".format(det.name))
     if hasattr(det, "images_per_set") and (real_acq_time is not None):
@@ -156,7 +158,7 @@ def _check_mini_expo(exposure, acq_time):
 
 
 def shutter_step(detectors, motor, step):
-    """ customized step to ensure shutter is open before
+    """customized step to ensure shutter is open before
     reading at each motor point and close shutter after reading
     """
     yield from bps.checkpoint()
@@ -215,12 +217,10 @@ def ct(dets, exposure):
     to see which device is being linked
     """
 
-    pe1c, = dets
+    (pe1c,) = dets
     md = {}
     # setting up area_detector
-    (num_frame, acq_time, computed_exposure) = yield from _configure_area_det(
-        exposure
-    )
+    (num_frame, acq_time, computed_exposure) = yield from _configure_area_det(exposure)
     area_det = xpd_configuration["area_det"]
     # update md
     _md = ChainMap(
@@ -282,12 +282,10 @@ def Tramp(dets, exposure, Tstart, Tstop, Tstep, per_step=None):
     open during the ramping.
     """
 
-    pe1c, = dets
+    (pe1c,) = dets
     md = {}
     # setting up area_detector
-    (num_frame, acq_time, computed_exposure) = yield from _configure_area_det(
-        exposure
-    )
+    (num_frame, acq_time, computed_exposure) = yield from _configure_area_det(exposure)
     area_det = xpd_configuration["area_det"]
     temp_controller = xpd_configuration["temp_controller"]
     # compute Nsteps
@@ -311,13 +309,7 @@ def Tramp(dets, exposure, Tstart, Tstop, Tstep, per_step=None):
         },
     )
     plan = bp.scan(
-        [area_det],
-        temp_controller,
-        Tstart,
-        Tstop,
-        Nsteps,
-        md=_md,
-        per_step=per_step
+        [area_det], temp_controller, Tstart, Tstop, Nsteps, md=_md, per_step=per_step
     )
     yield from plan
 
@@ -361,11 +353,9 @@ def Tlist(dets, exposure, T_list, per_step=None):
     open during the ramping.
     """
 
-    pe1c, = dets
+    (pe1c,) = dets
     # setting up area_detector and temp_controller
-    (num_frame, acq_time, computed_exposure) = yield from _configure_area_det(
-        exposure
-    )
+    (num_frame, acq_time, computed_exposure) = yield from _configure_area_det(exposure)
     area_det = xpd_configuration["area_det"]
     T_controller = xpd_configuration["temp_controller"]
     xpdacq_md = {
@@ -424,25 +414,17 @@ def tseries(dets, exposure, delay, num, auto_shutter=False):
         >>> ScanPlan(bt, tseries, 10, 5, 10, False)
     """
 
-    pe1c, = dets
+    (pe1c,) = dets
     md = {}
     # setting up area_detector
     area_det = xpd_configuration["area_det"]
-    (num_frame, acq_time, computed_exposure) = yield from _configure_area_det(
-        exposure
-    )
+    (num_frame, acq_time, computed_exposure) = yield from _configure_area_det(exposure)
     real_delay = max(0, delay - computed_exposure)
     period = max(computed_exposure, real_delay + computed_exposure)
     print(
-        "INFO: requested delay = {}s  -> computed delay = {}s".format(
-            delay, real_delay
-        )
+        "INFO: requested delay = {}s  -> computed delay = {}s".format(delay, real_delay)
     )
-    print(
-        "INFO: nominal period (neglecting readout overheads) of {} s".format(
-            period
-        )
-    )
+    print("INFO: nominal period (neglecting readout overheads) of {} s".format(period))
     # update md
     _md = ChainMap(
         md,
@@ -481,8 +463,7 @@ def tseries(dets, exposure, delay, num, auto_shutter=False):
 
 
 def _nstep(start, stop, step_size):
-    """ helper function to compute number of steps and step_size
-    """
+    """helper function to compute number of steps and step_size"""
     requested_nsteps = abs((start - stop) / step_size)
 
     computed_nsteps = int(requested_nsteps) + 1  # round down for a finer step
@@ -490,9 +471,7 @@ def _nstep(start, stop, step_size):
     computed_step_size = computed_step_list[1] - computed_step_list[0]
     print(
         "INFO: requested temperature step size = {} ->"
-        "computed temperature step size = {}".format(
-            step_size, computed_step_size
-        )
+        "computed temperature step size = {}".format(step_size, computed_step_size)
     )
     return computed_nsteps, computed_step_size
 
@@ -513,7 +492,7 @@ def new_short_uid():
 
 
 def _clean_info(obj):
-    """ stringtify and replace space"""
+    """stringtify and replace space"""
     return str(obj).strip().replace(" ", "_")
 
 
@@ -536,7 +515,7 @@ class MDOrderedDict(OrderedDict):
         return md_dict
 
 
-class Beamtime(ValidatedDictLike, YamlDict, ABC):
+class Beamtime(YamlValidatedDictLike, YamlDict, ABC):
     """
     class that carries necessary information for a beamtime
 
@@ -578,6 +557,8 @@ class Beamtime(ValidatedDictLike, YamlDict, ABC):
     def __init__(
         self, pi_last, saf_num, experimenters=None, *, wavelength=None, **kwargs
     ):
+        print()
+        print(kwargs)
         if experimenters is None:
             experimenters = []
         super().__init__(
@@ -599,7 +580,7 @@ class Beamtime(ValidatedDictLike, YamlDict, ABC):
 
     @property
     def wavelength(self):
-        """ wavelength value of current beamtime. updated value will be
+        """wavelength value of current beamtime. updated value will be
         passed down to all related objects"""
         return self._wavelength
 
@@ -610,7 +591,7 @@ class Beamtime(ValidatedDictLike, YamlDict, ABC):
 
     @property
     def md(self):
-        """ metadata of current object """
+        """metadata of current object"""
         return dict(self)
 
     @property
@@ -639,9 +620,7 @@ class Beamtime(ValidatedDictLike, YamlDict, ABC):
         # yaml sync list
         self._referenced_by.append(scanplan)
         # save order
-        with open(
-            os.path.join(glbl["config_base"], ".scanplan_order.yml"), "w+"
-        ) as f:
+        with open(os.path.join(glbl["config_base"], ".scanplan_order.yml"), "w+") as f:
             scanplan_order = {}
             for i, name in enumerate(self.scanplans.keys()):
                 scanplan_order.update({i: name + ".yml"})
@@ -657,9 +636,7 @@ class Beamtime(ValidatedDictLike, YamlDict, ABC):
         # yaml sync list
         self._referenced_by.append(sample)
         # save order
-        with open(
-            os.path.join(glbl["config_base"], ".sample_order.yml"), "w+"
-        ) as f:
+        with open(os.path.join(glbl["config_base"], ".sample_order.yml"), "w+") as f:
             sample_order = {}
             for i, name in enumerate(self.samples.keys()):
                 sample_order.update({i: name + ".yml"})
@@ -687,18 +664,14 @@ class Beamtime(ValidatedDictLike, YamlDict, ABC):
         )
 
     def __str__(self):
-        contents = [
-            "", "ScanPlans:"
-        ]
+        contents = ["", "ScanPlans:"]
         contents.extend(
             [
                 "{}: {}".format(i, sp_name)
                 for i, sp_name in enumerate(self.scanplans.keys())
             ]
         )
-        contents.extend(
-            ["", "Samples:"]
-        )
+        contents.extend(["", "Samples:"])
         contents.extend(
             [
                 "{}: {}".format(i, sa_name)
@@ -708,14 +681,14 @@ class Beamtime(ValidatedDictLike, YamlDict, ABC):
         return "\n".join(contents)
 
     def list(self):
-        """ method to list out all ScanPlan and Sample objects related
+        """method to list out all ScanPlan and Sample objects related
         to this Beamtime object
         """
         # for back-compat
         print(self)
 
     def list_bkg(self):
-        """ method to list background object only """
+        """method to list background object only"""
 
         contents = ["", "Background:"] + [
             "{}: {}".format(i, sa_name)
@@ -769,7 +742,255 @@ class Beamtime(ValidatedDictLike, YamlDict, ABC):
         raise NotImplementedError("This is currently not implemented")
 
 
-class Sample(ValidatedDictLike, YamlChainMap, ABC):
+# class RedisBeamtime(MyRedisDict, ABC):
+class RedisBeamtime(RedisValidatedDictLike, MyRedisDict, ABC):
+    """
+    class that carries necessary information for a beamtime
+
+    Parameters
+    ----------
+    pi_last : str
+        last name of PI to this beamtime.
+    saf_num : int
+        Safty Approval Form number to current beamtime.
+    experimenters : list, optional
+        list of experimenter names. Each of experimenter name is
+        expected to be comma separated as `first_name', `last_name`.
+    wavelength : float, optional
+        wavelength of current beamtime, in angstrom.
+    kwargs :
+        extra keyword arguments for current beamtime.
+
+    Examples
+    --------
+    Inspect avaiable samples, plans.
+    >>> print(bt)
+    ScanPlans:
+    0: (...summary of scanplan...)
+
+    Samples:
+    0: (...name of sample...)
+
+    or equivalently
+    >>> bt.list()
+    ScanPlans:
+    0: (...summary of scanplan...)
+
+    Samples:
+    0: (...name of sample...)
+    """
+
+    _REQUIRED_FIELDS = ["bt_piLast", "bt_safN"]
+
+    def __init__(
+        self,
+        pi_last,
+        saf_num,
+        experimenters=None,
+        *,
+        wavelength=None,
+        # bt_prefix="bt",
+        # redis_host="localhost",
+        # redis_port=6379,
+        # redis_db=0,
+        **kwargs
+    ):
+        if experimenters is None:
+            experimenters = []
+        self._pi_last = pi_last
+        self._saf_num = saf_num
+        self._experimenters = experimenters
+        self._wavelength = wavelength
+        self._kwargs = dict(
+            bt_piLast=_clean_info(pi_last),
+            bt_safN=_clean_info(saf_num),
+            bt_experimenters=experimenters,
+            bt_wavelength=wavelength,
+        )
+        super().__init__(**self._kwargs, **kwargs)
+        self.scanplans = MDOrderedDict()
+        self.samples = MDOrderedDict()
+        self._referenced_by = []
+        # used by YamlDict when reload
+        self.setdefault("bt_uid", new_short_uid())
+        self.robot_info = {}
+        self._scanplan_order = {}
+        self._sample_order = {}
+
+        # self.update({"bt_piLast": self._pi_last})
+        # self.update({"bt_safN": self._saf_num})
+        # self.update({"bt_experimenters": self._experimenters})
+        # self.update({"bt_wavelength": self._wavelength})
+
+    @property
+    def wavelength(self):
+        """wavelength value of current beamtime. updated value will be
+        passed down to all related objects"""
+        return self._wavelength
+
+    @wavelength.setter
+    def wavelength(self, val):
+        self._wavelength = val
+        self.update(bt_wavelength=val)
+
+    @property
+    def md(self):
+        """metadata of current object"""
+        return dict(self)
+
+    @property
+    def all_sample_in_magazine(self):
+        """All samples in the robot magazine"""
+        return [
+            i
+            for i, (k, v) in enumerate(self.samples.items())
+            if v["sa_uid"] in self.robot_info
+        ]
+
+    def validate(self):
+        # This is automatically called whenever the contents are changed.
+        missing = set(self._REQUIRED_FIELDS) - set(self)
+        if missing:
+            raise ValueError("Missing required fields: {}".format(missing))
+
+    # def default_yaml_path(self):
+    #     return os.path.join(glbl["yaml_dir"], "bt_bt.yml").format(**self)
+
+    def register_scanplan(self, scanplan):
+        # Notify this Beamtime about an ScanPlan that should be re-synced
+        # whenever the contents of the Beamtime are edited.
+        scanplan_name = scanplan.short_summary()
+        self.scanplans.update({scanplan_name: scanplan})
+        # yaml sync list
+        self._referenced_by.append(scanplan)
+        # # save order
+        # with open(
+        #     os.path.join(glbl["config_base"], ".scanplan_order.yml"), "w+"
+        # ) as f:
+        #     scanplan_order = {}
+        #     for i, name in enumerate(self.scanplans.keys()):
+        #         scanplan_order.update({i: name + ".yml"})
+        #     # debug line
+        #     self._scanplan_order = scanplan_order
+        #     yaml.dump(scanplan_order, f)
+
+    def register_sample(self, sample):
+        # Notify this Beamtime about an Sample that should be re-synced
+        # whenever the contents of the Beamtime are edited.
+        sample_name = sample.get("sample_name", None)
+        self.samples.update({sample_name: sample})
+        # yaml sync list
+        self._referenced_by.append(sample)
+        # # save order
+        # with open(
+        #     os.path.join(glbl["config_base"], ".sample_order.yml"), "w+"
+        # ) as f:
+        #     sample_order = {}
+        #     for i, name in enumerate(self.samples.keys()):
+        #         sample_order.update({i: name + ".yml"})
+        #     # debug line
+        #     self._sample_order = sample_order
+        #     yaml.dump(sample_order, f)
+
+    # @classmethod
+    # def from_yaml(cls, f):
+    #     d = yaml.unsafe_load(f)
+    #     instance = cls.from_dict(d)
+    #     if not isinstance(f, str):
+    #         instance.filepath = os.path.abspath(f.name)
+    #     return instance
+
+    @classmethod
+    def from_dict(cls, d):
+        return cls(
+            d.pop("bt_piLast"),
+            d.pop("bt_safN"),
+            d.pop("bt_experimenters"),
+            wavelength=d.pop("bt_wavelength"),
+            bt_uid=d.pop("bt_uid"),
+            **d
+        )
+
+    def __str__(self):
+        contents = ["", "ScanPlans:"]
+        contents.extend(
+            [
+                "{}: {}".format(i, sp_name)
+                for i, sp_name in enumerate(self.scanplans.keys())
+            ]
+        )
+        contents.extend(["", "Samples:"])
+        contents.extend(
+            [
+                "{}: {}".format(i, sa_name)
+                for i, sa_name in enumerate(self.samples.keys())
+            ]
+        )
+        return "\n".join(contents)
+
+    def list(self):
+        """method to list out all ScanPlan and Sample objects related
+        to this Beamtime object
+        """
+        # for back-compat
+        print(self)
+
+    def list_bkg(self):
+        """method to list background object only"""
+
+        contents = ["", "Background:"] + [
+            "{}: {}".format(i, sa_name)
+            for i, sa_name in enumerate(self.samples.keys())
+            if sa_name.startswith("bkgd")
+        ]
+        print("\n".join(contents))
+
+    def robot_location_number(self, geometry=None):
+        """Add information about the samples so that they can be loaded by the
+        robot
+
+        Parameters
+        ----------
+        geometry : {'capillary', 'plate', None}, optional
+            The geometry of the samples to be loaded, if None use the capillary
+            geometry. Defaults to None
+
+        """
+        print(
+            "Please input the location of each sample in the robot"
+            "magazine. If the sample is not in the magazine just leave it "
+            "blank and hit <enter>."
+        )
+        for i, sample in enumerate(self.samples.keys()):
+            print(i, sample)
+            ip = input()
+            if ip:
+                loc = int(ip)
+                self.robot_info[self.samples[sample]["sa_uid"]] = {
+                    "robot_identifier": loc,
+                    "robot_geometry": geometry,
+                }
+
+    def _robot_barcode_number(self):
+        # PROTOTYPE!!!
+        # while True:
+        # ask for user input
+        # ask for QR from reader
+        # if done brake
+        raise NotImplementedError("This is currently not implemented")
+
+    def _robot_barcode_barcode(self):
+        # PROTOTYPE!!!
+        # Read from barcode reader
+        # split into base and sample via mod 2
+        qrs = []
+        locs, sample_barcode = qrs[::2], qrs[1::2]
+        for loc, sb in zip(locs, sample_barcode):
+            self.robot_info[sb] = {"robot_identifer": loc}
+        raise NotImplementedError("This is currently not implemented")
+
+
+class Sample(YamlValidatedDictLike, YamlChainMap, ABC):
     """
     class that carries sample-related metadata
 
@@ -798,7 +1019,7 @@ class Sample(ValidatedDictLike, YamlChainMap, ABC):
     _REQUIRED_FIELDS = ["sample_name"]
 
     def __init__(self, beamtime: Beamtime, sample_md: dict):
-        if ('sample_name' not in sample_md) and ('sample_composition' not in sample_md):
+        if ("sample_name" not in sample_md) and ("sample_composition" not in sample_md):
             raise ValueError(
                 "At least sample_name and sample_composition is needed.\n"
                 "For example\n"
@@ -817,9 +1038,9 @@ class Sample(ValidatedDictLike, YamlChainMap, ABC):
             raise ValueError("Missing required fields: {}".format(missing))
 
     def default_yaml_path(self):
-        return os.path.join(
-            glbl["yaml_dir"], "samples", "{sample_name}.yml"
-        ).format(**self)
+        return os.path.join(glbl["yaml_dir"], "samples", "{sample_name}.yml").format(
+            **self
+        )
 
     @classmethod
     def from_yaml(cls, f, beamtime=None):
@@ -836,7 +1057,7 @@ class Sample(ValidatedDictLike, YamlChainMap, ABC):
         return cls(beamtime, map1)
 
 
-class ScanPlan(ValidatedDictLike, YamlChainMap, ABC):
+class ScanPlan(YamlValidatedDictLike, YamlChainMap, ABC):
     """A class that carries scan plan with corresponding experimental arguments
 
     after creation, this Sample object will be related to Beamtime
@@ -889,20 +1110,16 @@ class ScanPlan(ValidatedDictLike, YamlChainMap, ABC):
 
     @property
     def md(self):
-        """ metadata for current object """
-        open_run, = [
-            msg for msg in self.factory() if msg.command == "open_run"
-        ]
+        """metadata for current object"""
+        (open_run,) = [msg for msg in self.factory() if msg.command == "open_run"]
         return open_run.kwargs
 
     @property
     def bound_arguments(self):
-        """ bound arguments of this ScanPlan object """
+        """bound arguments of this ScanPlan object"""
         signature = inspect.signature(self.plan_func)
         # empty list is for [pe1c]
-        bound_arguments = signature.bind(
-            [], *self["sp_args"], **self["sp_kwargs"]
-        )
+        bound_arguments = signature.bind([], *self["sp_args"], **self["sp_kwargs"])
         # bound_arguments.apply_defaults() # only valid in py 3.5
         complete_kwargs = bound_arguments.arguments
         # remove place holder for "dets"
@@ -920,9 +1137,7 @@ class ScanPlan(ValidatedDictLike, YamlChainMap, ABC):
         # pass parameter to plan_func -> needed for statTramp-like plan
         if "bt" in inspect.signature(self.plan_func).parameters:
             extra_kw["bt"] = self._bt
-        plan = self.plan_func(
-            [pe1c], *self["sp_args"], **self["sp_kwargs"], **extra_kw
-        )
+        plan = self.plan_func([pe1c], *self["sp_args"], **self["sp_kwargs"], **extra_kw)
         return plan
 
     def short_summary(self):
@@ -979,8 +1194,14 @@ def load_calibration_md(poni_file: str) -> dict:
     return dict(ai.getPyFAI())
 
 
-def count_with_calib(detectors: list, num: int = 1, delay: float = None, *, calibration_md: dict = None,
-                     md: dict = None) -> typing.Generator:
+def count_with_calib(
+    detectors: list,
+    num: int = 1,
+    delay: float = None,
+    *,
+    calibration_md: dict = None,
+    md: dict = None
+) -> typing.Generator:
     """
     Take one or more readings from detectors with shutter control and calibration metadata injection.
 
