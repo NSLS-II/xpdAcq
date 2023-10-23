@@ -30,7 +30,7 @@ from xpdconf.conf import XPD_SHUTTER_CONF
 
 from .glbl import glbl
 from .tools import regularize_dict_key
-from .validated_dict import ValidatedDictLike
+from .validated_dict import RedisValidatedDictLike, YamlValidatedDictLike
 from .xpdacq_conf import xpd_configuration
 from .yamldict import YamlChainMap, YamlDict
 # from redis_dict import RedisDict
@@ -515,7 +515,7 @@ class MDOrderedDict(OrderedDict):
         return md_dict
 
 
-class Beamtime(ValidatedDictLike, YamlDict, ABC):
+class Beamtime(YamlValidatedDictLike, YamlDict, ABC):
     """
     class that carries necessary information for a beamtime
 
@@ -743,7 +743,7 @@ class Beamtime(ValidatedDictLike, YamlDict, ABC):
 
 
 # class RedisBeamtime(MyRedisDict, ABC):
-class RedisBeamtime(ValidatedDictLike, MyRedisDict, ABC):
+class RedisBeamtime(RedisValidatedDictLike, MyRedisDict, ABC):
     """
     class that carries necessary information for a beamtime
 
@@ -848,11 +848,10 @@ class RedisBeamtime(ValidatedDictLike, MyRedisDict, ABC):
         ]
 
     def validate(self):
-        pass
-        # # This is automatically called whenever the contents are changed.
-        # missing = set(self._REQUIRED_FIELDS) - set(self)
-        # if missing:
-        #     raise ValueError("Missing required fields: {}".format(missing))
+        # This is automatically called whenever the contents are changed.
+        missing = set(self._REQUIRED_FIELDS) - set(self)
+        if missing:
+            raise ValueError("Missing required fields: {}".format(missing))
 
     # def default_yaml_path(self):
     #     return os.path.join(glbl["yaml_dir"], "bt_bt.yml").format(**self)
@@ -991,7 +990,7 @@ class RedisBeamtime(ValidatedDictLike, MyRedisDict, ABC):
         raise NotImplementedError("This is currently not implemented")
 
 
-class Sample(ValidatedDictLike, YamlChainMap, ABC):
+class Sample(YamlValidatedDictLike, YamlChainMap, ABC):
     """
     class that carries sample-related metadata
 
@@ -1058,7 +1057,7 @@ class Sample(ValidatedDictLike, YamlChainMap, ABC):
         return cls(beamtime, map1)
 
 
-class ScanPlan(ValidatedDictLike, YamlChainMap, ABC):
+class ScanPlan(YamlValidatedDictLike, YamlChainMap, ABC):
     """A class that carries scan plan with corresponding experimental arguments
 
     after creation, this Sample object will be related to Beamtime
